@@ -5,6 +5,14 @@ import math
 from wntr.utils.ordered_set import OrderedSet
 import enum
 from six import with_metaclass
+try:
+    import pyomo.environ as pe
+    import pyomo.core.expr.current as EXPR
+    from pyomo.core.base.var import _GeneralVarData
+    pyomo_types = {_GeneralVarData,}
+except:
+    pe = None
+    pyomo_types = {None,}
 
 if not hasattr(math, 'inf'):
     math.inf = float('inf')
@@ -242,8 +250,8 @@ class Leaf(with_metaclass(abc.ABCMeta, ExpressionBase)):
 
     @property
     def value(self):
-        if self._c_obj is not None:
-            return self._c_obj.value
+        #if self._c_obj is not None:
+        #    return self._c_obj.value
         return self._value
 
     @value.setter
@@ -1084,12 +1092,17 @@ def sign(val):
             return 1
         else:
             return -1
+    elif type(val) in pyomo_types:
+        return EXPR.Expr_if(IF = val >= 0,
+                     THEN = 1, ELSE = -1)
     return val._unary_operation_helper(SignOperator)
 
 
 def abs(val):
     if type(val) in native_numeric_types:
         return math.fabs(val)
+    elif type(val) in pyomo_types:
+        return EXPR.AbsExpression(val)
     return val._unary_operation_helper(AbsOperator)
 
 
