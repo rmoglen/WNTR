@@ -39,7 +39,7 @@ class PyomoModel(object):
         pyomo_m.params = pe.Param(range(n_params), mutable=True)
         for i, p in enumerate(aml_model.params()):
             pyomo_map['params'][i] = p
-            pyomo_m.params[i] = p.value
+            pyomo_m.params[i] = p._value
         
         ### Variables
         n_vars = len(list(aml_model.vars()))
