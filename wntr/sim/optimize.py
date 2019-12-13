@@ -34,43 +34,38 @@ class PyomoModel(object):
                      'vars': {},
                      'cons': {}} 
         
+        # Maps aml parameters and variables to pyomo param and var
+        # used to evaluate pyomo expressions
+        aml_to_pyomo = {}
+        
         ### Parameters
         n_params = len(list(aml_model.params()))
         pyomo_m.params = pe.Param(range(n_params), mutable=True)
         for i, p in enumerate(aml_model.params()):
-            pyomo_map['params'][i] = p
             pyomo_m.params[i] = p._value
+            pyomo_map['params'][i] = p
+            aml_to_pyomo[p] = p._value
         
         ### Variables
         n_vars = len(list(aml_model.vars()))
         pyomo_m.vars = pe.Var(range(n_vars))
         for i, v in enumerate(aml_model.vars()):
-            pyomo_map['vars'][i] = v
             pyomo_m.vars[i].set_value(v._value) # intialize
-            v._value = pyomo_m.vars[i] # update aml var using the pyomo var
+            pyomo_map['vars'][i] = v
+            aml_to_pyomo[v] = pyomo_m.vars[i]
             
         ### Constraint
         n_cons = len(list(aml_model.cons()))
         pyomo_m.cons = pe.Constraint(range(n_cons))
         for i, c in enumerate(aml_model.cons()):
-            pyomo_map['cons'][i] = c
             expr = c.expr
-            if isinstance(expr, sim.aml.expr.ConditionalExpression):
-                con_list = expr._conditions
-                expr_list = expr._exprs
-                pyomo_expr = 0
-                # loop through con, exp in reverse order
-                for ci,ei in zip(reversed(con_list), reversed(expr_list)):
-                    #print(ci, ei) 
-                    pyomo_expr = EXPR.Expr_if(IF = ci.evaluate(), 
-                                            THEN = ei.evaluate(), 
-                                            ELSE = pyomo_expr)
-    
+            pyomo_expr = expr.evaluate_pyomo(aml_to_pyomo)
+            try:
                 pyomo_m.cons[i] = pyomo_expr == 0
-            else:
-                pyomo_expr = expr.evaluate()
-                pyomo_m.cons[i] = pyomo_expr == 0
-        
+                pyomo_map['cons'][i] = c
+            except: # infeasible constraint, occurs when pipes are closed?
+                pass
+
         ### Objective
         pyomo_m.obj = pe.Objective(expr=1, sense=pe.minimize)
         
@@ -100,8 +95,7 @@ class PyomoModel(object):
             for i in pyomo_m.vars:
                 val = pyomo_m.vars[i].value
                 var_values[pyomo_m.vars[i].index()] = val
-                #print(pyomo_map['vars'][i], list(aml_m.vars())[i], val)
-                pyomo_map['vars'][i]._value = val # update the aml var 
+                pyomo_map['vars'][i].value = val # update the aml var 
             
             # Update wn
             sim.hydraulics.store_results_in_network(self._wn, aml_m)

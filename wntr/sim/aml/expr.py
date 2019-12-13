@@ -250,8 +250,8 @@ class Leaf(with_metaclass(abc.ABCMeta, ExpressionBase)):
 
     @property
     def value(self):
-        #if self._c_obj is not None:
-        #    return self._c_obj.value
+        if self._c_obj is not None:
+            return self._c_obj.value
         return self._value
 
     @value.setter
@@ -261,6 +261,9 @@ class Leaf(with_metaclass(abc.ABCMeta, ExpressionBase)):
             self._c_obj.value = val
 
     def evaluate(self):
+        return self._value
+    
+    def evaluate_pyomo(self, aml_to_pyomo):
         return self._value
 
     @abc.abstractmethod
@@ -501,6 +504,70 @@ class expression(ExpressionBase):
         val_dict = dict()
         for oper in self.operators():
             oper.evaluate(val_dict)
+        return val_dict[self.last_node()]
+    
+    def evaluate_pyomo(self, aml_to_pyomo):
+        val_dict = dict()
+        
+        def _update(arg, val_dict, aml_to_pyomo):
+            if isinstance(arg, Operator):
+                arg = val_dict[arg]
+            elif arg in list(aml_to_pyomo.keys()):
+                arg = aml_to_pyomo[arg]
+            else:
+                arg = arg._value
+            return arg
+            
+        for oper in self.operators():
+            
+            if isinstance(oper, UnaryOperator):
+                
+                arg, = tuple(oper.operands())
+                arg = _update(arg, val_dict, aml_to_pyomo)
+                
+                if isinstance(oper, NegationOperator):
+                    val_dict[oper] = -1*arg
+                elif isinstance(oper, SignOperator):
+                    val_dict[oper] = EXPR.Expr_if(
+                            IF = arg >= 0,
+                            THEN = 1, 
+                            ELSE = -1)
+                elif isinstance(oper, AbsOperator):
+                    val_dict[oper] = EXPR.AbsExpression(arg)
+                else:
+                    return
+                    
+            elif isinstance(oper, BinaryOperator):
+                
+                arg1, arg2 = tuple(oper.operands())
+                arg1 = _update(arg1, val_dict, aml_to_pyomo)
+                arg2 = _update(arg2, val_dict, aml_to_pyomo)
+
+                if isinstance(oper, AddOperator):
+                    val_dict[oper] = arg1 + arg2
+                elif isinstance(oper, SubtractOperator):
+                    val_dict[oper] = arg1 - arg2
+                elif isinstance(oper, MultiplyOperator):
+                    val_dict[oper] = arg1 * arg2
+                elif isinstance(oper, DivideOperator):
+                    val_dict[oper] = arg1 / arg2
+                elif isinstance(oper, PowerOperator):
+                    val_dict[oper] = arg1 ** arg2
+                else:
+                    return
+            
+            elif isinstance(oper, InequalityOperator):
+                
+                body, lb, ub = tuple(oper.operands())
+                body = _update(body, val_dict, aml_to_pyomo)
+                lb = _update(lb, val_dict, aml_to_pyomo)
+                ub = _update(ub, val_dict, aml_to_pyomo)
+                
+                val_dict[oper] = lb <= body <= ub
+            
+            else:
+                return
+                
         return val_dict[self.last_node()]
 
     def get_vars(self):
@@ -1092,17 +1159,12 @@ def sign(val):
             return 1
         else:
             return -1
-    elif type(val) in pyomo_types:
-        return EXPR.Expr_if(IF = val >= 0,
-                     THEN = 1, ELSE = -1)
     return val._unary_operation_helper(SignOperator)
 
 
 def abs(val):
     if type(val) in native_numeric_types:
         return math.fabs(val)
-    elif type(val) in pyomo_types:
-        return EXPR.AbsExpression(val)
     return val._unary_operation_helper(AbsOperator)
 
 
@@ -1484,7 +1546,18 @@ class ConditionalExpression(object):
         for i, cond in enumerate(self._conditions):
             if cond.evaluate():
                 return self._exprs[i].evaluate()
-
+    
+    def evaluate_pyomo(self, aml_to_pyomo):
+        con_list = self._conditions
+        expr_list = self._exprs
+        pyomo_expr = 0
+        # loop through con, exp in reverse order
+        for ci,ei in zip(reversed(con_list), reversed(expr_list)):
+            pyomo_expr = EXPR.Expr_if(IF = ci.evaluate_pyomo(aml_to_pyomo), 
+                                      THEN = ei.evaluate_pyomo(aml_to_pyomo), 
+                                      ELSE = pyomo_expr)
+        return pyomo_expr
+    
     def reverse_ad(self):
         for i, cond in enumerate(self._conditions):
             if cond.evaluate():
