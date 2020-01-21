@@ -264,7 +264,12 @@ class Leaf(with_metaclass(abc.ABCMeta, ExpressionBase)):
         return self._value
     
     def evaluate_pyomo(self, aml_to_pyomo):
-        return self._value
+        if self in list(aml_to_pyomo.keys()):
+            arg = aml_to_pyomo[self]
+        else:
+            arg = self._value
+                
+        return arg
 
     @abc.abstractmethod
     def _str(self):
@@ -563,7 +568,7 @@ class expression(ExpressionBase):
                 lb = _update(lb, val_dict, aml_to_pyomo)
                 ub = _update(ub, val_dict, aml_to_pyomo)
                 
-                val_dict[oper] = lb <= body <= ub
+                val_dict[oper] = pe.inequality(lb, body, ub)
             
             else:
                 return

@@ -14,7 +14,12 @@ from wntr.utils.ordered_set import OrderedSet
 from wntr.sim import aml
 from wntr.sim.models import constants, var, param, constraint
 from wntr.sim.models.utils import ModelUpdater
-
+try:
+    import pyomo.environ as pe
+    import pyomo.core.expr.current as EXPR
+except:
+    pe = None
+    
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +99,50 @@ def create_hydraulic_model(wn, mode='DD', HW_approx='default'):
     return m, model_updater
 
 
+def convert_hydraulic_model_to_pyomo(m):
+        
+    # Pyomo model
+    pyomo_m = pe.Block(concrete=True)
+    
+    # Map of pyomo index to aml objects
+    pyomo_map = {'params': {}, 
+                 'vars': {},
+                 'cons': {}} 
+    
+    # Maps aml parameters and variables to pyomo param and var
+    # used to evaluate pyomo expressions
+    aml_to_pyomo_map = {}
+    
+    ### Parameters
+    n_params = len(list(m.params()))
+    pyomo_m.params = pe.Param(range(n_params), mutable=True)
+    for i, p in enumerate(m.params()):
+        pyomo_m.params[i] = p._value
+        pyomo_map['params'][i] = p
+        aml_to_pyomo_map[p] = p._value
+    
+    ### Variables
+    n_vars = len(list(m.vars()))
+    pyomo_m.vars = pe.Var(range(n_vars))
+    for i, v in enumerate(m.vars()):
+        pyomo_m.vars[i].set_value(v._value) # intialize
+        pyomo_map['vars'][i] = v
+        aml_to_pyomo_map[v] = pyomo_m.vars[i]
+        
+    ### Constraint
+    n_cons = len(list(m.cons()))
+    pyomo_m.cons = pe.Constraint(range(n_cons))
+    for i, c in enumerate(m.cons()):
+        expr = c.expr
+        pyomo_expr = expr.evaluate_pyomo(aml_to_pyomo_map)
+        pyomo_m.cons[i] = pyomo_expr == 0
+        pyomo_map['cons'][i] = c
+
+    ### Objective
+    pyomo_m.obj = pe.Objective(expr=1, sense=pe.minimize)
+    
+    return pyomo_m, pyomo_map
+    
 def update_model_for_controls(m, wn, model_updater, control_manager):
     """
 
