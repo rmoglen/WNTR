@@ -1,5 +1,5 @@
 import wntr.sim.hydraulics
-from wntr.sim.solvers import NewtonSolver, SolverStatus
+from wntr.sim.solvers import NewtonSolver, PyomoSolver, SolverStatus
 import wntr.sim.results
 from wntr.network.controls import ControlManager, _ControlType
 import numpy as np
@@ -1140,6 +1140,9 @@ def _solver_helper(model, solver, solver_options):
     model.set_structure()
     if solver is NewtonSolver:
         _solver = NewtonSolver(solver_options)
+        sol = _solver.solve(model)
+    elif solver is PyomoSolver:
+        _solver = PyomoSolver(solver_options)
         sol = _solver.solve(model)
     elif solver is scipy.optimize.fsolve:
         x, infodict, ier, mesg = solver(model.evaluate_residuals, model.get_x(), **solver_options)

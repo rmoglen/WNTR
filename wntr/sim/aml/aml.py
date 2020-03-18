@@ -382,8 +382,11 @@ class Model(object):
     def vars(self):
         for i in self._var_cvar_map:
             yield i
-
-
+    
+    def params(self):
+        for i in self._param_cparam_map:
+            yield i
+            
 class _NodeDict(MutableMapping):
     def __init__(self, mapping=None):
         self._name = 'None'
