@@ -71,13 +71,32 @@ The following example computes peak ground acceleration, peak ground velocity, a
     >>> pgv = earthquake.pgv_attenuation_model(distance)
     >>> repair_rate = earthquake.repair_rate_model(pgv) 
 
-The earthquake properties can be plotted on the network, as follows.
+The earthquake properties can be plotted on the network using the following example. The resulting map is shown in :numref:`fig-network`.
 
 .. doctest::
+    :hide:
+    
+    >>> import matplotlib.pylab as plt
+	>>> fig = plt.figure()
+    
+.. doctest::
 
-    >>> nodes, edges = wntr.graphics.plot_network(wn, link_attribute=pga) 
+    >>> nodes, edges = wntr.graphics.plot_network(wn, link_attribute=pga, node_size=4,
+    ...     link_width=2, link_colorbar_label='PGA (g)')
 
+.. doctest::
+    :hide:
 
+    >>> plt.tight_layout()
+    >>> plt.savefig('network_pga.png', dpi=300)
+    
+.. _fig-network:
+.. figure:: figures/network_pga.png
+   :width: 640
+   :alt: Peak ground acceleration
+   
+   Peak ground acceleration.
+   
 .. _pipe_leak:
 	
 Pipe breaks or leaks

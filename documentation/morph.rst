@@ -72,7 +72,7 @@ Pipes that fall below a user defined pipe diameter threshold are candidates for 
       :width: 734
       :alt: Parallel merge
 	  
-      Parallel pipe merge
+      Parallel pipe merge.
 	  
 The :class:`~wntr.morph.skel.skeletonize` function is used to perform network skeletonization.
 The iterative algorithm first loops over all candidate pipes (pipes below the pipe diameter threshold) and removes branch pipes.  
@@ -81,7 +81,11 @@ Finally, the algorithm loops over all candidate pipes and merges pipes in parall
 This initial set of operations can generate new branch pipes, pipes in series, and pipes in parallel.
 This cycle repeats until the network can no longer be reduced.  
 The user can specify if branch trimming, series pipe merge, and/or parallel pipe merge should be included in the skeletonization operations.  
-The user can also specify a maximum number of cycles to include in the process.
+The user can also specify a maximum number of cycles to include in the process. 
+
+.. only:: latex
+
+   See the \href{https://wntr.readthedocs.io/en/latest/apidoc/wntr.morph.skel.html}{online API documentation} for more information on skeletonization.
 
 Results from network skeletonization include the skeletonized water network model and (optionally) 
 a "skeletonization map" which maps original network nodes to merged nodes that are represented in the skeletonized network.  
@@ -105,8 +109,7 @@ the original 'Junction 1' and 'Junction 2.'
 
 The following example performs network skeletonization on Net6  
 and compares system pressure using the original and skeletonized networks.
-The example starts by creating a water network model for Net6 and then skeletonizing 
-it using a using a pipe diameter threshold of 12 inches. 
+The example starts by creating a water network model for Net6, listing the number of network components (e.g., 3356 nodes, 3892 links), and then skeletonizing it using a using a pipe diameter threshold of 12 inches. 
 The skeletonization procedure reduces the number of nodes in the network from 
 approximately 3000 to approximately 1000 (:numref:`fig-skel-example`).
 
@@ -261,7 +264,7 @@ node coordinates scaled by 100 m.
 
     >>> wn_scaled_coord = wntr.morph.scale_node_coordinates(wn, 100)
 
-The next example converts node coordinates to longitude/latitude.
+The next example converts node coordinates to longitude/latitude. The longitude and latitude coordinates of two locations (e.g., nodes, tanks) on the map must be provided to convert the other node coordinates to longitude/latitude. 
 
 .. doctest::
 
@@ -280,10 +283,9 @@ For a pipe split, the original pipe is split into two pipes by adding a new
 junction and new pipe to the model.  
 For a pipe break, the original pipe is broken into two disconnected pipes by 
 adding two new junctions and a new pipe to the model.  
-**With a pipe break, there is no longer flow possible from one side of the break to the other. 
-This is more likely to 
-introduce non-convergable hydraulics than a pipe split with a leak 
-added.**
+
+.. note::
+  With a pipe break, flow is no longer possible from one side of the break to the other. This is more likely to introduce non-convergable hydraulics than a pipe split with a leak added.
 
 The updated model retains the original length of the pipe section (:numref:`fig-split-break`). 
 The split or break occurs at a user specified distance between the 
@@ -309,9 +311,9 @@ The new pipe can be added to either end of the original pipe.
     :width: 774
     :alt: Pipe split and pipe break
 	
-    Pipe split and pipe break
+    Pipe split and pipe break.
 	
-The following example splits pipe '123' in Net3 into pipes '123' and '123_B'.  
+The following example splits pipe '123' in Net3 into pipes '123' and '123_B.'  
 The new junction is named '123_node.' The new node is then used to add a leak 
 to the model.
 
