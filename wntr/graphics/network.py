@@ -49,7 +49,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
                node_size=20, node_range=[None,None], node_alpha=1, node_cmap=None, node_labels=False,
                link_width=1, link_range=[None,None], link_alpha=1, link_cmap=None, link_labels=False,
                valve_layer=None, add_colorbar=True, node_colorbar_label='Node', link_colorbar_label='Link', 
-               directed=False, ax=None, filename=None):
+               directed=False, ax=None, filename=None, plotfig=False):
     """
     Plot network graphic
 
@@ -260,6 +260,9 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
      
     if filename:
         plt.savefig(filename)
+
+    if plotfig:
+        plt.show()
         
     return nodes, edges
 
