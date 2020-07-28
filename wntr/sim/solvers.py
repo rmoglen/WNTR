@@ -10,6 +10,7 @@ except:
     pe = None
 
 from wntr.sim.hydraulics import convert_hydraulic_model_to_pyomo
+from wntr.sim.hydraulics import create_pyomo_calibration_model
 
 warnings.filterwarnings("error",'Matrix is exactly singular', sp.linalg.MatrixRankWarning)
 np.set_printoptions(precision=3, threshold=10000, linewidth=300)
@@ -151,11 +152,16 @@ class PyomoSolver(object):
             self.tee = False
         else:
             self.tee = self._options['tee']
+        if 'calibrate' not in self._options:
+            self._options.update({'calibrate': False})
             
     def solve(self, model):
-    
-        # Create a Pyomo model from the aml model
-        pyomo_m, pyomo_map = convert_hydraulic_model_to_pyomo(model)
+        if self._options['calibrate']:
+            # Create a Pyomo model from the aml model
+            pyomo_m, pyomo_map = create_pyomo_calibration_model(model,self._options)
+        else:
+            # Create a Pyomo model from the aml model
+            pyomo_m, pyomo_map = convert_hydraulic_model_to_pyomo(model)
                 
         # Solve the Pyomo model
         opt = pe.SolverFactory('ipopt')
@@ -167,6 +173,8 @@ class PyomoSolver(object):
         for i in pyomo_m.vars:
             val = pyomo_m.vars[i].value
             var_values[pyomo_m.vars[i].index()] = val
-            pyomo_map['vars'][i].value = val # update the aml var 
-
+            pyomo_map['vars'][i].value = val # update the aml var
+            # if i==22:
+            #     print("hw_resistance:" ,pyomo_m.vars[i].value)
+        #pyomo_m.display()
         return 1, status, 0

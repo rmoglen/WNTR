@@ -147,6 +147,68 @@ def convert_hydraulic_model_to_pyomo(m):
     pyomo_m.obj = pe.Objective(expr=1, sense=pe.minimize)
     
     return pyomo_m, pyomo_map
+
+def create_pyomo_calibration_model(m,options):
+    # Pyomo model
+    pyomo_m = pe.Block(concrete=True)
+    
+    # Map of pyomo index to aml objects
+    pyomo_map = {'params': {}, 
+                 'vars': {},
+                 'cons': {}} 
+    
+    # Maps aml parameters and variables to pyomo param and var
+    # used to evaluate pyomo expressions
+    aml_to_pyomo_map = {}
+
+    n_calibrate=len(options['param_to_var'].values())
+    
+    ### Parameters
+    n_params = len(list(m.params()))
+    pyomo_m.params = pe.Param(range(n_params-n_calibrate), mutable=True)
+    param_to_var={}
+    for i, p in enumerate(m.params()):
+        if (p._name in options['param_to_var'].values()):
+            param_to_var.update({i:p})
+        else:
+            pyomo_m.params[i-len(param_to_var)] = p._value
+            pyomo_map['params'][i-len(param_to_var)] = p
+            aml_to_pyomo_map[p] = p._value
+    
+    ### Variables
+    n_vars = len(list(m.vars()))
+    pyomo_m.vars = pe.Var(range(n_vars+n_calibrate))
+    for i, v in enumerate(m.vars()):
+        pyomo_m.vars[i].set_value(v._value) # intialize
+        pyomo_map['vars'][i] = v
+        aml_to_pyomo_map[v] = pyomo_m.vars[i]
+
+    #parameters with uncertainty
+    for key, p in enumerate(param_to_var.values()):
+        pyomo_m.vars[key+n_vars].set_value(p._value) # intialize
+        pyomo_map['vars'][key+n_vars] = p
+        aml_to_pyomo_map[p] = pyomo_m.vars[key+n_vars]
+        
+    ### Constraint
+    n_cons = len(list(m.cons()))
+    pyomo_m.cons = pe.Constraint(range(n_cons))
+    for i, c in enumerate(m.cons()):
+        expr = c.expr
+        pyomo_expr = expr.evaluate_pyomo(aml_to_pyomo_map)
+        pyomo_m.cons[i] = pyomo_expr == 0
+        pyomo_map['cons'][i] = c
+
+    try:        #if measurements exist for that timestep, modify the objective function to minimize the difference between measurement and simulation
+        p_m=options['meas'].loc[options['timestep'],]
+        pyomo_m.obj = pe.Objective( expr = sum((p_m.loc[sensor]-aml_to_pyomo_map[m.head[sensor]])**2 for sensor in p_m.index), sense=pe.minimize )
+    except:
+        ### Objective
+        pyomo_m.obj = pe.Objective(expr=1, sense=pe.minimize)
+
+    #print(pyomo_m.pprint())
+
+    
+    return pyomo_m, pyomo_map
     
 def update_model_for_controls(m, wn, model_updater, control_manager):
     """
@@ -400,3 +462,23 @@ def store_results_in_network(wn, m):
         node.leak_demand = 0
         node.demand = (sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'INLET')) -
                        sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'OUTLET')))
+
+
+def store_calibration_results(wn, m, options):
+    """
+
+    Parameters
+    ----------
+    wn: wntr.network.WaterNetworkModel
+    m: wntr.aml.Model
+    options: dict
+
+    """
+    calibration_results={}
+    for pipe_name in options['param_to_var'].keys():
+        hw_resistance_param=m.hw_resistance[pipe_name].value
+        link=wn.get_link(pipe_name)
+        roughness=(hw_resistance_param/(m.hw_k * link.diameter**(-4.871) * link.length))**(-1/1.852) 
+        calibration_results.update({pipe_name : roughness})
+
+    return calibration_results

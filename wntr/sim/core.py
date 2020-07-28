@@ -843,6 +843,7 @@ class WNTRSimulator(WaterNetworkSimulator):
         results.error_code = None
         results.time = []
         results.network_name = self._wn.name
+        results.calibration={}
 
         self._initialize_internal_graph()
 
@@ -892,6 +893,9 @@ class WNTRSimulator(WaterNetworkSimulator):
 
             diagnostics.run(last_step='presolve controls, rules, and model updates', next_step='solve')
 
+            if 'calibrate' in self._solver_options.keys() and self._solver_options['calibrate']:    #should come up with cleaner way of passing in timestep to pyomo model
+                self._solver_options.update({'timestep':self._wn.sim_time })
+
             solver_status, mesg, iter_count = _solver_helper(self._model, self._solver, self._solver_options)
             if solver_status == 0 and self._backup_solver is not None:
                 solver_status, mesg, iter_count = _solver_helper(self._model, self._backup_solver, self._backup_solver_options)
@@ -910,6 +914,9 @@ class WNTRSimulator(WaterNetworkSimulator):
             # Enter results in network and update previous inputs
             logger.debug('storing results in network')
             wntr.sim.hydraulics.store_results_in_network(self._wn, self._model)
+
+            if self._solver_options['calibrate']:
+                results.calibration.update({self._wn.sim_time : wntr.sim.hydraulics.store_calibration_results(self._wn, self._model, self._solver_options)})
 
             diagnostics.run(last_step='solve and store results in network', next_step='postsolve controls')
 
@@ -960,6 +967,7 @@ class WNTRSimulator(WaterNetworkSimulator):
                 break
 
         wntr.sim.hydraulics.get_results(self._wn, results, node_res, link_res)
+
         return results
 
     def _initialize_name_id_maps(self):
