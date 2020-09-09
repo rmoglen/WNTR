@@ -131,7 +131,7 @@ For :math:`q \geq 0`:
 These equations are symmetric across the origin
 and valid for any :math:`q`. Thus, this equation can be used for flow in
 either direction. However, the derivative with respect to :math:`q` at :math:`q = 0` 
-is :math:`0`. In certain scenarios, this can cause the Jacobian of the
+is :math:`0`. In certain scenarios, this can cause the Jacobian matrix of the
 set of hydraulic equations to become singular (when :math:`q=0`). 
 To overcome this limitation, the WNTRSimulator
 splits the domain of :math:`q` into six segments to
@@ -352,7 +352,7 @@ a simulation.
 Advanced: Customized models with WNTR's AML
 -------------------------------------------
 
-WNTR has a custom algebraic modeling language (AML) which is used for
+WNTR has a custom algebraic modeling language (AML) that is used for
 WNTR's hydraulic model (used in the
 :class:`~wntr.sim.core.WNTRSimulator`). This AML is primarily used for
 efficient evaluation of constraint residuals and derivatives. WNTR's
