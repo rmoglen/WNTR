@@ -3,6 +3,14 @@ import scipy.sparse as sp
 import warnings
 import logging
 import enum
+try:
+    import pyomo.environ as pe
+    import pyomo.core.expr.current as EXPR
+except:
+    pe = None
+
+from wntr.sim.hydraulics import convert_hydraulic_model_to_pyomo
+from wntr.sim.hydraulics import create_pyomo_calibration_model
 
 warnings.filterwarnings("error",'Matrix is exactly singular', sp.linalg.MatrixRankWarning)
 np.set_printoptions(precision=3, threshold=10000, linewidth=300)
@@ -130,4 +138,43 @@ class NewtonSolver(object):
         return SolverStatus.error, 'Reached maximum number of iterations: ' + str(outer_iter), outer_iter
 
 
+class PyomoSolver(object):
+    """
+    Pyomo Solver class.
+    """
+    
+    def __init__(self, options=None):
+        if options is None:
+            options = {}
+        self._options = options
 
+        if 'tee' not in self._options:
+            self.tee = False
+        else:
+            self.tee = self._options['tee']
+        if 'calibrate' not in self._options:
+            self._options.update({'calibrate': False})
+            
+    def solve(self, model):
+        if self._options['calibrate']:
+            # Create a Pyomo model from the aml model
+            pyomo_m, pyomo_map = create_pyomo_calibration_model(model,self._options)
+        else:
+            # Create a Pyomo model from the aml model
+            pyomo_m, pyomo_map = convert_hydraulic_model_to_pyomo(model)
+                
+        # Solve the Pyomo model
+        opt = pe.SolverFactory('ipopt')
+        status = opt.solve(pyomo_m, tee=self._options['tee'])
+        #print(status)
+        
+        # Extract variable values and update the aml
+        var_values = {}
+        for i in pyomo_m.vars:
+            val = pyomo_m.vars[i].value
+            var_values[pyomo_m.vars[i].index()] = val
+            pyomo_map['vars'][i].value = val # update the aml var
+            # if i==22:
+            #     print("hw_resistance:" ,pyomo_m.vars[i].value)
+        #pyomo_m.display()
+        return 1, status, 0

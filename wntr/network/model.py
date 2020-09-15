@@ -18,16 +18,13 @@ import logging
 import six
 
 import sys
-if sys.version_info[0] == 2:
-    from collections import MutableSequence
-else:
-    from collections.abc import MutableSequence
+from collections.abc import MutableSequence
 
 import numpy as np
 import networkx as nx
 import pandas as pd
 
-from .options import WaterNetworkOptions
+from .options import Options
 from .base import Link, Registry, LinkStatus, AbstractModel
 from .elements import Junction, Reservoir, Tank
 from .elements import Pipe, Pump, HeadPump, PowerPump
@@ -63,7 +60,7 @@ class WaterNetworkModel(AbstractModel):
         # Network name
         self.name = None
 
-        self._options = WaterNetworkOptions()
+        self._options = Options()
         self._node_reg = NodeRegistry(self)
         self._link_reg = LinkRegistry(self)
         self._pattern_reg = PatternRegistry(self)
@@ -182,7 +179,7 @@ class WaterNetworkModel(AbstractModel):
         
         Returns
         -------
-        WaterNetworkOptions
+        Options
         
         """
         return self._options
@@ -384,8 +381,8 @@ class WaterNetworkModel(AbstractModel):
         min_vol : float
             Minimum tank volume.
         vol_curve : str
-            Name of a volume curve (optional)
-        coordinates : tuple of floats
+            Name of a volume curve, optional
+        coordinates : tuple of floats, optional
             X-Y coordinates of the node location.
             
         Raises
@@ -848,7 +845,7 @@ class WaterNetworkModel(AbstractModel):
                         if link.start_node_name == tank_name:
                             continue
                         else:
-                            link_has_cv = True
+                            link_has_cv = True 
                 if isinstance(link, Pump):
                     if link.start_node_name == tank_name:
                         continue
@@ -1574,15 +1571,19 @@ class WaterNetworkModel(AbstractModel):
         A list of link names connected to the node
         """
         link_types = {'Pipe', 'Pump', 'Valve'}
-        if flag.upper() == 'ALL':
-            return [link_name for link_name, link_type in self._node_reg.get_usage(node_name) if link_type in link_types and node_name in {self.get_link(link_name).start_node_name, self.get_link(link_name).end_node_name}]
-        elif flag.upper() == 'INLET':
-            return [link_name for link_name, link_type in self._node_reg.get_usage(node_name) if link_type in link_types and node_name == self.get_link(link_name).end_node_name]
-        elif flag.upper() == 'OUTLET':
-            return [link_name for link_name, link_type in self._node_reg.get_usage(node_name) if link_type in link_types and node_name == self.get_link(link_name).start_node_name]
+        link_data = self._node_reg.get_usage(node_name)
+        if link_data is None:
+            return []
         else:
-            logger.error('Unrecognized flag: {0}'.format(flag))
-            raise ValueError('Unrecognized flag: {0}'.format(flag))
+            if flag.upper() == 'ALL':
+                return [link_name for link_name, link_type in link_data if link_type in link_types and node_name in {self.get_link(link_name).start_node_name, self.get_link(link_name).end_node_name}]
+            elif flag.upper() == 'INLET':
+                return [link_name for link_name, link_type in link_data if link_type in link_types and node_name == self.get_link(link_name).end_node_name]
+            elif flag.upper() == 'OUTLET':
+                return [link_name for link_name, link_type in link_data if link_type in link_types and node_name == self.get_link(link_name).start_node_name]
+            else:
+                logger.error('Unrecognized flag: {0}'.format(flag))
+                raise ValueError('Unrecognized flag: {0}'.format(flag))
 
     def query_node_attribute(self, attribute, operation=None, value=None, node_type=None):
         """
@@ -1744,24 +1745,43 @@ class WaterNetworkModel(AbstractModel):
         inpfile.read(filename, wn=self)
         self._inpfile = inpfile
 
-    def write_inpfile(self, filename, units=None):
+    def write_inpfile(self, filename, units=None, version=2.2, force_coordinates=False):
         """
         Writes the current water network model to an EPANET INP file
+
+        .. note::
+
+            By default, WNTR now uses EPANET version 2.2 for the EPANET simulator engine. Thus,
+            The WaterNetworkModel will also write an EPANET 2.2 formatted INP file by default as well.
+            Because the PDA analysis options will break EPANET 2.0, the ``version`` option will allow
+            the user to force EPANET 2.0 compatibility at the expense of pressured-dependent analysis 
+            options being turned off.
+
 
         Parameters
         ----------
         filename : string
             Name of the inp file.
+
         units : str, int or FlowUnits
             Name of the units being written to the inp file.
+
+        version : float, {2.0, **2.2**}
+            Optionally specify forcing EPANET 2.0 compatibility.
+
+        force_coordinates : bool
+            This only applies if `self.options.graphics.map_filename` is not `None`,
+            and will force the COORDINATES section to be written even if a MAP file is
+            provided. False by default, but coordinates **are** written by default since
+            the MAP file is `None` by default.
 
         """
         if self._inpfile is None:
             logger.warning('Writing a minimal INP file without saved non-WNTR options (energy, etc.)')
             self._inpfile = wntr.epanet.InpFile()
         if units is None:
-            units = self._options.hydraulic.en2_units
-        self._inpfile.write(filename, self, units=units)
+            units = self._options.hydraulic.inpfile_units
+        self._inpfile.write(filename, self, units=units, version=version, force_coordinates=force_coordinates)
     
    
 class PatternRegistry(Registry):
@@ -2177,12 +2197,14 @@ class NodeRegistry(Registry):
         max_level : float
             Maximum tank level.
         diameter : float
-            Tank diameter.
+            Tank diameter of a cylindrical tank (only used when the volume 
+            curve is None)
         min_vol : float
-            Minimum tank volume.
-        vol_curve : str
-            Name of a volume curve (optional)
-        coordinates : tuple of floats
+            Minimum tank volume (only used when the volume curve is None)
+        vol_curve : str, optional
+            Name of a volume curve. The volume curve overrides the tank diameter
+            and minimum volume.
+        coordinates : tuple of floats, optional
             X-Y coordinates of the node location.
             
         Raises
@@ -2201,8 +2223,22 @@ class NodeRegistry(Registry):
             raise ValueError("Initial tank level must be greater than or equal to the tank minimum level.")
         if init_level > max_level:
             raise ValueError("Initial tank level must be less than or equal to the tank maximum level.")
-        if vol_curve and not isinstance(vol_curve, six.string_types):
-            raise ValueError('Volume curve name must be a string')
+        if not vol_curve is None:
+            if not isinstance(vol_curve, six.string_types):
+                raise ValueError('Volume curve name must be a string')
+            elif not vol_curve in self._curve_reg.volume_curve_names:
+                raise ValueError('The volume curve ' + vol_curve + ' is not one of the curves in the ' +
+                                 'list of volume curves. Valid volume curves are:' + 
+                                 str(self._curve_reg.volume_curve_names))
+            vcurve = np.array(self._curve_reg[vol_curve].points)
+            if min_level < vcurve[0,0]:
+                raise ValueError('The volume curve ' + vol_curve + ' has a minimum value ({0:5.2f}) \n' +
+                                 'greater than the minimum level for tank "' + name + '" ({1:5.2f})\n' +
+                                 'please correct the user input.'.format(vcurve[0,0],min_level))
+            elif max_level > vcurve[-1,0]:
+                raise ValueError('The volume curve ' + vol_curve + ' has a maximum value ({0:5.2f}) \n' +
+                                 'less than the maximum level for tank "' + name + '" ({1:5.2f})\n' +
+                                 'please correct the user input.'.format(vcurve[-1,0],max_level))
         tank = Tank(name, self)
         tank.elevation = elevation
         tank.init_level = init_level

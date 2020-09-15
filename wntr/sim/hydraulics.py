@@ -14,11 +14,16 @@ from wntr.utils.ordered_set import OrderedSet
 from wntr.sim import aml
 from wntr.sim.models import constants, var, param, constraint
 from wntr.sim.models.utils import ModelUpdater
-
+try:
+    import pyomo.environ as pe
+    import pyomo.core.expr.current as EXPR
+except:
+    pe = None
+    
 logger = logging.getLogger(__name__)
 
 
-def create_hydraulic_model(wn, mode='DD', HW_approx='default'):
+def create_hydraulic_model(wn, HW_approx='default'):
     """
     Parameters
     ----------
@@ -44,9 +49,10 @@ def create_hydraulic_model(wn, mode='DD', HW_approx='default'):
 
     param.source_head_param(m, wn)
     param.expected_demand_param(m, wn)
-    if mode == 'DD':
+    mode = wn.options.hydraulic.demand_model
+    if mode in ['DD', 'DDA']:
         pass
-    elif mode == 'PDD':
+    elif mode in ['PDD', 'PDA']:
         param.pmin_param.build(m, wn, model_updater)
         param.pnom_param.build(m, wn, model_updater)
         param.pdd_poly_coeffs_param.build(m, wn, model_updater)
@@ -60,17 +66,17 @@ def create_hydraulic_model(wn, mode='DD', HW_approx='default'):
     param.pump_power_param.build(m, wn, model_updater)
     param.valve_setting_param.build(m, wn, model_updater)
 
-    if mode == 'DD':
+    if mode in ['DD','DDA']:
         pass
-    elif mode == 'PDD':
+    elif mode in ['PDD','PDA']:
         var.demand_var(m, wn)
     var.flow_var(m, wn)
     var.head_var(m, wn)
     var.leak_rate_var(m, wn)
 
-    if mode == 'DD':
+    if mode in ['DD','DDA']:
         constraint.mass_balance_constraint.build(m, wn, model_updater)
-    elif mode == 'PDD':
+    elif mode in ['PDD','PDA']:
         constraint.pdd_mass_balance_constraint.build(m, wn, model_updater)
         constraint.pdd_constraint.build(m, wn, model_updater)
     else:
@@ -98,6 +104,112 @@ def create_hydraulic_model(wn, mode='DD', HW_approx='default'):
     return m, model_updater
 
 
+def convert_hydraulic_model_to_pyomo(m):
+        
+    # Pyomo model
+    pyomo_m = pe.Block(concrete=True)
+    
+    # Map of pyomo index to aml objects
+    pyomo_map = {'params': {}, 
+                 'vars': {},
+                 'cons': {}} 
+    
+    # Maps aml parameters and variables to pyomo param and var
+    # used to evaluate pyomo expressions
+    aml_to_pyomo_map = {}
+    
+    ### Parameters
+    n_params = len(list(m.params()))
+    pyomo_m.params = pe.Param(range(n_params), mutable=True)
+    for i, p in enumerate(m.params()):
+        pyomo_m.params[i] = p._value
+        pyomo_map['params'][i] = p
+        aml_to_pyomo_map[p] = p._value
+    
+    ### Variables
+    n_vars = len(list(m.vars()))
+    pyomo_m.vars = pe.Var(range(n_vars))
+    for i, v in enumerate(m.vars()):
+        pyomo_m.vars[i].set_value(v._value) # intialize
+        pyomo_map['vars'][i] = v
+        aml_to_pyomo_map[v] = pyomo_m.vars[i]
+        
+    ### Constraint
+    n_cons = len(list(m.cons()))
+    pyomo_m.cons = pe.Constraint(range(n_cons))
+    for i, c in enumerate(m.cons()):
+        expr = c.expr
+        pyomo_expr = expr.evaluate_pyomo(aml_to_pyomo_map)
+        pyomo_m.cons[i] = pyomo_expr == 0
+        pyomo_map['cons'][i] = c
+
+    ### Objective
+    pyomo_m.obj = pe.Objective(expr=1, sense=pe.minimize)
+    
+    return pyomo_m, pyomo_map
+
+def create_pyomo_calibration_model(m,options):
+    # Pyomo model
+    pyomo_m = pe.Block(concrete=True)
+    
+    # Map of pyomo index to aml objects
+    pyomo_map = {'params': {}, 
+                 'vars': {},
+                 'cons': {}} 
+    
+    # Maps aml parameters and variables to pyomo param and var
+    # used to evaluate pyomo expressions
+    aml_to_pyomo_map = {}
+
+    n_calibrate=len(options['param_to_var'].values())
+    
+    ### Parameters
+    n_params = len(list(m.params()))
+    pyomo_m.params = pe.Param(range(n_params-n_calibrate), mutable=True)
+    param_to_var={}
+    for i, p in enumerate(m.params()):
+        if (p._name in options['param_to_var'].values()):
+            param_to_var.update({i:p})
+        else:
+            pyomo_m.params[i-len(param_to_var)] = p._value
+            pyomo_map['params'][i-len(param_to_var)] = p
+            aml_to_pyomo_map[p] = p._value
+    
+    ### Variables
+    n_vars = len(list(m.vars()))
+    pyomo_m.vars = pe.Var(range(n_vars+n_calibrate))
+    for i, v in enumerate(m.vars()):
+        pyomo_m.vars[i].set_value(v._value) # intialize
+        pyomo_map['vars'][i] = v
+        aml_to_pyomo_map[v] = pyomo_m.vars[i]
+
+    #parameters with uncertainty
+    for key, p in enumerate(param_to_var.values()):
+        pyomo_m.vars[key+n_vars].set_value(p._value) # intialize
+        pyomo_map['vars'][key+n_vars] = p
+        aml_to_pyomo_map[p] = pyomo_m.vars[key+n_vars]
+        
+    ### Constraint
+    n_cons = len(list(m.cons()))
+    pyomo_m.cons = pe.Constraint(range(n_cons))
+    for i, c in enumerate(m.cons()):
+        expr = c.expr
+        pyomo_expr = expr.evaluate_pyomo(aml_to_pyomo_map)
+        pyomo_m.cons[i] = pyomo_expr == 0
+        pyomo_map['cons'][i] = c
+
+    try:        #if measurements exist for that timestep, modify the objective function to minimize the difference between measurement and simulation
+        p_m=options['meas'].loc[options['timestep'],]
+        pyomo_m.obj = pe.Objective( expr = sum((p_m.loc[sensor]-aml_to_pyomo_map[m.head[sensor]])**2 for sensor in p_m.index), sense=pe.minimize )
+    except:
+        ### Objective
+        pyomo_m.obj = pe.Objective(expr=1, sense=pe.minimize)
+
+    #print(pyomo_m.pprint())
+
+    
+    return pyomo_m, pyomo_map
+    
 def update_model_for_controls(m, wn, model_updater, control_manager):
     """
 
@@ -154,17 +266,40 @@ def update_network_previous_values(wn):
     for tank_name, tank in wn.tanks():
         tank._prev_head = tank.head
 
-
 def update_tank_heads(wn):
     """
     Parameters
     ----------
     wn: wntr.network.WaterNetworkModel
     """
+    dt = wn.sim_time - wn._prev_sim_time   
+
     for tank_name, tank in wn.tanks():
         q_net = tank.demand
-        delta_h = 4.0 * q_net * (wn.sim_time - wn._prev_sim_time) / (math.pi * tank.diameter ** 2)
+        dV = q_net * dt
+        
+        if tank.vol_curve is None:    
+            delta_h = 4.0 * dV / (math.pi * tank.diameter ** 2)
+        else:
+            vcurve = np.array(tank.vol_curve.points)
+            level_x = vcurve[:,0]
+            volume_y = vcurve[:,1]
+            
+            # I had to include this because the _prev_head is the reference
+            # point needed if the tank.head (and tank.level) have already
+            # been updated. This isn't a problem for cases with no volume curve.
+            if tank.head == tank._prev_head:
+                cur_level = tank.level
+            else:
+                cur_level = tank._prev_head - (tank.head - tank.level)
+                            
+            V0 = np.interp(cur_level,level_x,volume_y)
+            V1 = V0 + dV
+            level_new = np.interp(V1,volume_y,level_x)
+            delta_h = level_new - cur_level
+                
         tank.head = tank._prev_head + delta_h
+            
 
 
 def initialize_results_dict(wn):
@@ -281,15 +416,16 @@ def get_results(wn, results, node_res, link_res):
     results.link = link_res
 
 
-def store_results_in_network(wn, m, mode='DD'):
+def store_results_in_network(wn, m):
     """
 
     Parameters
     ----------
     wn: wntr.network.WaterNetworkModel
     m: wntr.aml.Model
-    mode: str
+
     """
+    mode = wn.options.hydraulic.demand_model
     for name, link in wn.links():
         if link._is_isolated:
             link._flow = 0
@@ -303,7 +439,7 @@ def store_results_in_network(wn, m, mode='DD'):
             node.leak_demand = 0
         else:
             node.head = m.head[name].value
-            if mode == 'PDD':
+            if mode in ['PDD', 'PDA']:
                 node.demand = m.demand[name].value
             else:
                 node.demand = m.expected_demand[name].value
@@ -326,3 +462,23 @@ def store_results_in_network(wn, m, mode='DD'):
         node.leak_demand = 0
         node.demand = (sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'INLET')) -
                        sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'OUTLET')))
+
+
+def store_calibration_results(wn, m, options):
+    """
+
+    Parameters
+    ----------
+    wn: wntr.network.WaterNetworkModel
+    m: wntr.aml.Model
+    options: dict
+
+    """
+    calibration_results={}
+    for pipe_name in options['param_to_var'].keys():
+        hw_resistance_param=m.hw_resistance[pipe_name].value
+        link=wn.get_link(pipe_name)
+        roughness=(hw_resistance_param/(m.hw_k * link.diameter**(-4.871) * link.length))**(-1/1.852) 
+        calibration_results.update({pipe_name : roughness})
+
+    return calibration_results

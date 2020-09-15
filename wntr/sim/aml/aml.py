@@ -4,10 +4,7 @@ from .evaluator import Evaluator
 from .expr import Var, Param, native_numeric_types, Float, ConditionalExpression
 from collections import OrderedDict
 from wntr.utils.ordered_set import OrderedSet
-if sys.version_info.major == 2:
-    from collections import MutableMapping
-else:
-    from collections.abc import MutableMapping
+from collections.abc import MutableMapping
 
 
 class Constraint(object):
@@ -382,8 +379,11 @@ class Model(object):
     def vars(self):
         for i in self._var_cvar_map:
             yield i
-
-
+    
+    def params(self):
+        for i in self._param_cparam_map:
+            yield i
+            
 class _NodeDict(MutableMapping):
     def __init__(self, mapping=None):
         self._name = 'None'
